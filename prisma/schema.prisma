@@ -1,0 +1,921 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id             String     @id @default(auto()) @map("_id") @db.ObjectId
+  fullName       String
+  email          String     @unique
+  password       String
+  companyName    String
+  profilePicture String?
+  role           Role       @default(ADMIN)
+  adminRole      AdminRole  @default(MANAGER)
+  permissions    String[]   @default([])
+  status         UserStatus @default(APPROVED)
+  lastLoginAt    DateTime?
+  createdAt      DateTime   @default(now())
+
+  DealLifecycle DealLifecycle[]
+
+  escalationConversations EscalationConversation[] @relation("AdminInEscalations")
+  SupportQuery            SupportQuery[]
+  blogs                   Blog[]                   @relation("AdminBlogs")
+  LoginOTP                LoginOTP[]
+
+  @@index([status])
+  @@index([role])
+}
+
+enum AdminRole {
+  SUPER_ADMIN
+  MANAGER
+  CUSTOMER_SUPPORT
+  FINANCE
+  BLOG_MANAGER
+}
+
+model Blog {
+  id            String  @id @default(auto()) @map("_id") @db.ObjectId
+  title         String
+  slug          String  @unique
+  content       String
+  summary       String?
+  featuredImage String?
+  authorName    String
+  isPublished   Boolean @default(false)
+
+  // SEO Metadata
+  metaTitle       String?
+  metaDescription String?
+  metaKeywords    String[] @default([])
+
+  tags       String[] @default([])
+  categories String[] @default([])
+
+  authorId    String? @db.ObjectId
+  authorAdmin Admin?  @relation("AdminBlogs", fields: [authorId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([authorId])
+  @@index([isPublished])
+}
+
+model User {
+  id             String  @id @default(auto()) @map("_id") @db.ObjectId
+  // User details
+  fullName       String
+  email          String  @unique
+  password       String
+  profilePicture String?
+  websiteUrl     String?
+
+  // Company details (flattened into same table)
+  companyName         String?
+  gstNumber           String?
+  gstDocumentUrl      String? // URL provided by frontend
+  panNumber           String?
+  panDocumentUrl      String?
+  cinNumber           String?
+  cinDocumentUrl      String?
+  typeOfEntity        String?
+  dateOfIncorporation DateTime?
+  industryFocus       String?
+  registeredAddress   String?
+  businessAddress     String?
+  state               String?
+  city                String?
+  pincode             String?
+
+  // JSON fields for multiple contacts
+  contactInfo Json?
+
+  // Workflow
+  role                        Role @default(USER)
+  combinedJobsRemaining       Int  @default(0)
+  combinedUrgentJobsRemaining Int  @default(0)
+  combinedBoostsRemaining     Int  @default(0)
+  combinedRefreshesRemaining  Int  @default(0)
+  combinedProfilesRemaining   Int  @default(0)
+  combinedTotalJobsUsed       Int  @default(0)
+  combinedTotalProfilesUsed   Int  @default(0)
+
+  isVerified         Boolean            @default(false)
+  isVerifiedCompany  Boolean            @default(false)
+  verificationStatus VerificationStatus @default(PENDING)
+  country            String?
+  onboardedAt        DateTime?          @default(now())
+
+  isPriorityUser  Boolean     @default(false)
+  status          UserStatus  @default(PENDING)
+  previousStatus  UserStatus? // Stores status before suspension for restoration
+  rejectionReason String      @default("")
+  mode            Mode        @default(SEEKER) // PROVIDER or SEEKER
+  lastLoginAt     DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  trialEndsAt     DateTime?
+  trialPostsUsed  Int         @default(0)
+
+  // ── E2EE key pair (RSA-2048) ─────────────────────────────────────────────
+  publicKey  String? // PEM-encoded RSA-2048 public key (shared openly)
+  privateKey String? // PEM-encoded RSA-2048 private key (server-managed, never exposed to clients)
+
+  ResetToken ResetToken[]
+  LoginOTP   LoginOTP[]
+
+  ProviderPost ProviderPost[]
+
+  SeekerPost SeekerPost[]
+
+  Application Application[]
+
+  Message Message[]
+
+  Notification Notification[]
+
+  Payment Payment[]
+
+  Subscription Subscription[]
+
+  AddOnPurchase AddOnPurchase[]
+
+  Transaction Transaction[]
+
+  escalationConversations EscalationConversation[] @relation("EscalatedBy")
+  SupportQuery            SupportQuery[]
+  DeviceToken             DeviceToken[]
+
+  @@index([status])
+  @@index([role])
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PENDING
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
+enum PaymentStatus {
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+// model Plan {
+//   id              String   @id @default(auto()) @map("_id") @db.ObjectId
+//   title           String
+//   description     String
+//   duration        Int?     @default(0)
+//   isFreePlan      Boolean  @default(false)
+//   jobsAllowed     Int  
+//   profilesAllowed Int
+//   audience        String
+//   extraMonths     Int?
+//   hasVerification Boolean  @default(false)
+//   benefits        Json?
+
+//   // Manual country-specific pricing (India has GST breakdown)
+//   countryPricing  Json     // { "IN": { basePrice, gstPercentage, gstAmount, totalPrice, razorpayPlanId, currency }, "US": { totalPrice, razorpayPlanId, currency } }
+
+//   createdAt       DateTime @default(now())
+//   updatedAt       DateTime @updatedAt
+
+//   Subscription    Subscription[]
+// }
+
+// model Subscription {
+//   id                    String   @id @default(auto()) @map("_id") @db.ObjectId
+//   planId                String   @db.ObjectId
+//   userId                String   @db.ObjectId
+//   razorpaySubscriptionId String?
+//   razorpaySignature     String?
+//   currency              String   @default("INR")     // Subscription currency
+//   countryCode           String?                        // User's country
+//   startDate             DateTime?
+//   endDate               DateTime?
+//   nextBillingDate       DateTime?
+//   cancelledAt           DateTime?
+//   status                SubscriptionStatus
+
+//   totalJobsUsed         Int      @default(0)
+//   totalProfilesUsed     Int      @default(0)
+//   jobsRemaining         Int      @default(0)
+//   profilesRemaining     Int      @default(0)
+
+//   plan                  Plan     @relation(fields: [planId], references: [id])
+//   user                  User     @relation(fields: [userId], references: [id])
+//   Payment               Payment[]
+
+//   createdAt             DateTime @default(now())
+//   updatedAt             DateTime @updatedAt
+// }
+
+// model Payment {
+//   id                 String    @id @default(auto()) @map("_id") @db.ObjectId
+//   userId             String    @db.ObjectId
+//   subscriptionId     String    @db.ObjectId
+//   amount             Int       // Amount in smallest unit of subscription currency
+//   currency           String    // "INR", "USD", etc.
+//   countryCode        String?   // "IN", "US", etc.
+//   razorpayOrderId    String?
+//   razorpayPaymentId  String?
+//   razorpayInvoiceId  String?
+//   razorpaySignature  String?
+//   status             PaymentStatus
+//   createdAt          DateTime  @default(now())
+// razorpayRefundId    String?  // NEW
+// refundAmount        Int?     // NEW  
+// refundNotes         String?  // NEW
+
+//   user               User      @relation(fields: [userId], references: [id])
+//   subscription       Subscription? @relation(fields: [subscriptionId], references: [id])
+// }
+
+// ----------------- PLAN -----------------
+model Plan {
+  id                  String    @id @default(auto()) @map("_id") @db.ObjectId
+  name                PlanName?
+  countryCode         Country?
+  title               String
+  description         String
+  price               Float?
+  basePrice           Int?
+  gstPercentage       Float?    @default(0)
+  gstAmount           Int?      @default(0)
+  durationDays        Int?
+  duration            Int?      @default(0) // Month-based duration (legacy)
+  isFreePlan          Boolean   @default(false)
+  freePostsPerMonth   Int       @default(2)
+  jobsAllowed         Int       @default(0) // Total jobs allowed in the subscription lifecycle
+  profilesAllowed     Int       @default(0) // Total profiles allowed in the subscription lifecycle
+  audience            String
+  extraMonths         Int? // optional
+  hasVerification     Boolean   @default(false)
+  benefits            Json?
+  razorpayPlanId      String? // Razorpay plan ID (India only; international plans use orders, not plans)
+  isUnlimitedJobs     Boolean   @default(false)
+  isUnlimitedProfiles Boolean   @default(false)
+
+  // ─── Dynamic Config (moved from .env) ──────────────────────────────────────
+  founderCohortStartDate DateTime? // Only users who joined AFTER this date qualify
+  founderCohortCutoff    DateTime? // Cutoff date for users to qualify as "Founders"
+  founderDiscount        Float?    @default(0) // e.g. 0.25 for 25% off
+  founderExtensionDays   Int?      @default(0) // e.g. 90 extra days
+  founderFreeEndDate     DateTime? // Specific end date for free founder access (for FREE plans)
+  trialPeriodDays        Int?      @default(14) // Trial duration for this plan
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Subscription Subscription[]
+}
+
+// ----------------- SUBSCRIPTION -----------------
+model Subscription {
+  id                     String             @id @default(auto()) @map("_id") @db.ObjectId
+  planId                 String             @db.ObjectId
+  userId                 String             @db.ObjectId
+  razorpaySubscriptionId String?
+  razorpaySignature      String?
+  startDate              DateTime?
+  endDate                DateTime?
+  nextBillingDate        DateTime?
+  cancelledAt            DateTime?
+  status                 SubscriptionStatus // active, pending, cancelled, expired
+
+  monthlyPostsUsed  Int       @default(0)
+  lastPostResetDate DateTime?
+
+  totalJobsUsed     Int @default(0) // total jobs posted in this subscription
+  totalProfilesUsed Int @default(0) // total profiles applied in this subscription
+
+  jobsRemaining     Int @default(0) // remaining jobs allowed in this subscription
+  profilesRemaining Int @default(0) // remaining profiles allowed in this subscription
+
+  plan    Plan?     @relation(fields: [planId], references: [id])
+  user    User?     @relation(fields: [userId], references: [id])
+  Payment Payment[]
+
+  isUnlimitedJobs     Boolean @default(false)
+  isUnlimitedProfiles Boolean @default(false)
+
+  customPrice         Float?
+  discountPercent     Float?
+  discountAmount      Float?
+  isCustomPricing     Boolean @default(false)
+  freeCreditsAllotted Int?    @default(0)
+  trialExtensionDays  Int?    @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Performance indexes for dashboard stats
+  @@index([userId, status])
+}
+
+model Payment {
+  id                String          @id @default(auto()) @map("_id") @db.ObjectId
+  userId            String          @db.ObjectId
+  subscriptionId    String?         @db.ObjectId
+  type              PaymentType?    @default(SUBSCRIPTION)
+  amount            Float
+  razorpayOrderId   String?
+  razorpayPaymentId String?
+  razorpayInvoiceId String?
+  razorpaySignature String?
+  currency          PaymentCurrency @default(INR)
+  status            String // SUCCESS, FAILED, PENDING
+  referenceId       String?
+  isRefundable      Boolean         @default(false)
+  createdAt         DateTime        @default(now())
+  user              User?           @relation(fields: [userId], references: [id])
+  subscription      Subscription?   @relation(fields: [subscriptionId], references: [id])
+
+  // Performance indexes
+  @@index([userId])
+  @@index([subscriptionId])
+}
+
+model AddOn {
+  id              String          @id @default(auto()) @map("_id") @db.ObjectId
+  name            String? // e.g., "URGENT", "BOOST", "REFRESH" - used to group regional versions
+  countryCode     Country? // INDIA or INTERNATIONAL
+  currency        PaymentCurrency @default(INR)
+  title           String
+  description     String
+  basePrice       Int? // Price before GST in smallest currency unit (e.g., paise)
+  gstPercentage   Float?          @default(0) // GST percentage (e.g., 18.0)
+  gstAmount       Int? // Calculated GST amount in smallest currency unit
+  price           Int? // Total price (basePrice + gstAmount)
+  variant         String? // e.g., "JOB_POSTING", "PROFILE_ACCESS"
+  jobPostingLimit Int? // optional job posting limits
+  profilesAllowed Int? // optional profiles allowed limits
+  hasVerification Boolean         @default(false)
+  hasPriorityTag  Boolean         @default(false)
+
+  type     PaymentType?
+  category PostCategory?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  AddOnPurchases AddOnPurchase[]
+}
+
+model AddOnPurchase {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  addonId   String   @db.ObjectId // reference to addon (BOOST, REFRESH, etc.)
+  orderId   String // Razorpay order id
+  paymentId String? // after success
+  status    String // CREATED | PAID | FAILED
+  amount    Int
+  currency  String
+  createdAt DateTime @default(now())
+
+  user  User?  @relation(fields: [userId], references: [id])
+  addon AddOn? @relation(fields: [addonId], references: [id])
+
+  @@index([userId])
+}
+
+model Notification {
+  id     String  @id @default(auto()) @map("_id") @db.ObjectId
+  userId String? @db.ObjectId
+  user   User?   @relation(fields: [userId], references: [id])
+
+  title          String
+  message        String
+  type           String?
+  isRead         Boolean @default(false)
+  isDeleted      Boolean @default(false)
+  navigationData Json? // { pageCode, preferredMode, applicationId, dealId, postType }
+
+  // Polymorphic fields
+  createdById String? @db.ObjectId // ID of the entity (Admin or User)
+  creatorType String? // "ADMIN" or "USER"
+
+  createdAt DateTime @default(now())
+
+  // Performance indexes for dashboard stats
+  @@index([userId, isRead, isDeleted])
+}
+
+// Enums for roles and status
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Mode {
+  PROVIDER
+  SEEKER
+}
+
+enum UserStatus {
+  PENDING // Default after registration
+  APPROVED
+  REJECTED
+  SUSPENDED // For users with malicious activities
+}
+
+model ResetToken {
+  id        String   @id @default(cuid()) @map("_id")
+  userId    String   @db.ObjectId
+  token     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model LoginOTP {
+  id        String   @id @default(cuid()) @map("_id")
+  userId    String?  @db.ObjectId
+  adminId   String?  @db.ObjectId
+  token     String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user  User?  @relation(fields: [userId], references: [id])
+  admin Admin? @relation(fields: [adminId], references: [id])
+}
+
+model ProviderPost {
+  id                String   @id @default(auto()) @map("_id") @db.ObjectId
+  title             String
+  description       String?
+  imageUrl          String? // optional image URL for the post
+  skillTags         String[] // multiple skills for this post
+  role              String
+  level             String // plain string for seniority (e.g. "Junior", "Senior")
+  numberOfEmployees Int // how many employees are available
+
+  experience        Int? // years of experience
+  availabilityStart DateTime // start date
+  availabilityEnd   DateTime // end date
+  isRemote          Boolean // remote work possible
+  location          String? // city / location
+  timezone          String? // e.g. "IST", "UTC+5:30"
+  allocationPercent Int // percentage of availability
+  notes             String? // extra notes
+  isInternal        Boolean  @default(false) // internal visibility flag
+
+  postType         PostType     @default(PROVIDER)
+  postCategory     PostCategory @default(BENCH)
+  expiryDate       DateTime?
+  isBoosted        Boolean      @default(false)
+  boostExpiry      DateTime?
+  lastRefreshedAt  DateTime?
+  isRemovedByAdmin Boolean      @default(false)
+  removalReason    String?
+  removedAt        DateTime?
+
+  isFree    Boolean? @default(false)
+  paymentId String?
+
+  status PostStatus @default(ACTIVE)
+
+  // Relation to User (the provider who owns this post)
+  userId String @db.ObjectId
+  user   User?  @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Application Application[]
+
+  Conversation Conversation[]
+
+  // Performance indexes for dashboard stats
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+enum PostStatus {
+  ACTIVE
+  PENDING
+  APPLIED
+  FILLED
+  INACTIVE
+}
+
+//seeker post model can be added here
+model SeekerPost {
+  id                String     @id @default(auto()) @map("_id") @db.ObjectId
+  title             String
+  description       String?
+  imageUrl          String? // Optional image URL for the post
+  requiredSkills    String[] // Mandatory skills
+  preferredSkills   String[] // Optional/nice-to-have skills
+  role              String
+  level             String // Seniority (e.g., "Junior", "Senior")
+  numberOfEmployees Int // Number of people required
+  isRemote          Boolean
+  location          String?
+  timezone          String?
+  budgetRange       String?
+  currency          String     @default("INR")
+  status            PostStatus @default(ACTIVE)
+  priority          Priority   @default(MEDIUM)
+
+  postType         PostType     @default(SEEKER)
+  postCategory     PostCategory @default(BENCH)
+  expiryDate       DateTime?
+  isBoosted        Boolean      @default(false)
+  boostExpiry      DateTime?
+  lastRefreshedAt  DateTime?
+  isRemovedByAdmin Boolean      @default(false)
+  removalReason    String?
+  removedAt        DateTime?
+
+  isFree    Boolean? @default(false)
+  paymentId String?
+
+  // Relation to User (the company/seeker who owns this post)
+  userId String @db.ObjectId
+  user   User?  @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Application Application[]
+
+  Conversation Conversation[]
+
+  // Performance indexes for dashboard stats
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, createdAt])
+  @@index([status])
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+model Application {
+  id             String            @id @default(auto()) @map("_id") @db.ObjectId
+  applicantId    String            @db.ObjectId
+  applicant      User?             @relation(fields: [applicantId], references: [id])
+  providerPostId String?           @db.ObjectId
+  providerPost   ProviderPost?     @relation(fields: [providerPostId], references: [id])
+  seekerPostId   String?           @db.ObjectId
+  seekerPost     SeekerPost?       @relation(fields: [seekerPostId], references: [id])
+  conversationId String?           @db.ObjectId
+  status         ApplicationStatus @default(PENDING)
+  message        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  Conversation Conversation[]
+
+  DealLifecycle DealLifecycle[]
+
+  // Performance indexes for dashboard stats
+  @@index([applicantId])
+  @@index([applicantId, status])
+  @@index([providerPostId])
+  @@index([seekerPostId])
+  // Additional indexes for application API performance optimization
+  @@index([status]) // For status-based filtering
+  @@index([providerPostId, status]) // For received provider applications
+  @@index([seekerPostId, status]) // For received seeker applications
+  @@index([applicantId, providerPostId]) // Composite for applied provider queries
+  @@index([applicantId, seekerPostId]) // Composite for applied seeker queries
+}
+
+enum ApplicationStatus {
+  PENDING
+  PENDING_CONFIRMATION
+  APPROVED
+  COMPLETED
+  REJECTED
+}
+
+model DealLifecycle {
+  id            String      @id @default(auto()) @map("_id") @db.ObjectId
+  applicationId String      @db.ObjectId
+  application   Application @relation(fields: [applicationId], references: [id])
+
+  stage          DealStage    @default(INTRO_MADE)
+  lastUpdated    DateTime     @default(now())
+  nextActionDue  DateTime?
+  reason         String?
+  isEscalated    Boolean      @default(false)
+  escalatedBy    String?      @db.ObjectId // user/admin who raised escalation
+  // Optional escalation info
+  issueCategory  String? // e.g. "rate mismatch", "communication", etc.
+  moderatorNotes String?
+  adminAction    AdminAction?
+  // e.g. "resolved", "dropped", "blacklist"
+  resolvedById   String?      @db.ObjectId
+  resolvedBy     Admin?       @relation(fields: [resolvedById], references: [id])
+
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  escalationConversation EscalationConversation? @relation("DealEscalation")
+
+  // Performance indexes for dashboard stats
+  @@index([stage])
+  @@index([stage, updatedAt])
+  @@index([isEscalated])
+}
+
+enum AdminAction {
+  resolved
+  dropped
+  blacklist
+}
+
+enum DealStage {
+  INTRO_MADE
+  UNDER_DISCUSSION
+  PENDING_CONFIRMATION
+  OFFER_CONFIRMED
+  CLOSED_SUCCESSFUL
+  CLOSED_NOT_PROCEEDING
+  STUCK_NEEDS_REVIEW
+}
+
+model Conversation {
+  id             String        @id @default(auto()) @map("_id") @db.ObjectId
+  applicationId  String        @unique @db.ObjectId
+  application    Application   @relation(fields: [applicationId], references: [id])
+  providerPostId String?       @db.ObjectId
+  providerPost   ProviderPost? @relation(fields: [providerPostId], references: [id])
+  seekerPostId   String?       @db.ObjectId
+  seekerPost     SeekerPost?   @relation(fields: [seekerPostId], references: [id])
+  messages       Message[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([providerPostId])
+  @@index([seekerPostId])
+}
+
+model Message {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  conversationId String       @db.ObjectId
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  senderId       String       @db.ObjectId
+  sender         User         @relation(fields: [senderId], references: [id])
+  content        String // AES-128-GCM ciphertext (hex: iv:authTag:ciphertext)
+  encryptedKey   String? // AES-128 session key encrypted with recipient's RSA-2048 public key (base64)
+  isRead         Boolean      @default(false)
+  readBy         String[]     @default([])
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId])
+  @@index([createdAt])
+}
+
+model EscalationConversation {
+  id              String   @id @default(auto()) @map("_id") @db.ObjectId
+  dealLifecycleId String   @unique @db.ObjectId
+  escalatedById   String   @db.ObjectId // user/admin who raised escalation
+  adminId         String   @db.ObjectId // admin assigned to chat (nullable initially)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  dealLifecycle DealLifecycle @relation("DealEscalation", fields: [dealLifecycleId], references: [id])
+  escalatedBy   User          @relation("EscalatedBy", fields: [escalatedById], references: [id])
+  admin         Admin?        @relation("AdminInEscalations", fields: [adminId], references: [id])
+
+  messages EscalationMessage[]
+
+  @@index([adminId])
+}
+
+model EscalationMessage {
+  id                       String   @id @default(auto()) @map("_id") @db.ObjectId
+  escalationConversationId String   @db.ObjectId
+  senderId                 String   @db.ObjectId
+  content                  String
+  createdAt                DateTime @default(now())
+
+  escalationConversation EscalationConversation @relation(fields: [escalationConversationId], references: [id])
+
+  @@index([escalationConversationId])
+}
+
+// ============= SUPPORT QUERY SYSTEM =============
+
+enum QueryType {
+  LOGIN
+  REGISTRATION
+  PAYMENT
+  SUBSCRIPTION
+  POST
+  APPLICATION
+  BUG
+  FEATURE_REQUEST
+  OTHER
+}
+
+enum QueryStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum SupportSenderType {
+  USER
+  ADMIN
+}
+
+model SupportMessage {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  supportQueryId String       @db.ObjectId
+  supportQuery   SupportQuery @relation(fields: [supportQueryId], references: [id])
+
+  senderId   String?           @db.ObjectId
+  senderType SupportSenderType
+  content    String
+  files      Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([supportQueryId])
+}
+
+model SupportQuery {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  // Custom Ticket ID (12 digits)
+  ticketId String? @unique
+
+  // User info (optional - allows queries from non-logged-in users)
+  userId String? @db.ObjectId
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // Contact info
+  email String
+  name  String?
+  phone String?
+
+  // Query details
+  queryType   QueryType
+  subject     String
+  description String
+  files       Json?
+
+  // Status tracking
+  status QueryStatus @default(OPEN)
+
+  // Admin response (single admin)
+  adminId    String?   @db.ObjectId
+  admin      Admin?    @relation(fields: [adminId], references: [id])
+  response   String?
+  resolvedAt DateTime?
+
+  // Metadata
+  platform String? // "WEB", "ANDROID", "IOS"
+
+  // Conversation History
+  messages SupportMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([email])
+}
+
+// ============= PUSH NOTIFICATIONS =============
+
+enum Platform {
+  ANDROID
+  IOS
+  WEB
+}
+
+model DeviceToken {
+  id     String @id @default(auto()) @map("_id") @db.ObjectId
+  userId String @db.ObjectId
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  token    String // FCM token or Expo push token
+  platform Platform // ANDROID, IOS, WEB
+  deviceId String? // Optional unique device identifier
+
+  isActive   Boolean  @default(true)
+  lastUsedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, token])
+  @@index([userId, isActive])
+  @@index([token])
+}
+
+// ============= AUDIT LOGS =============
+
+enum AuditCategory {
+  USER_MANAGEMENT
+  STAFF
+  PLAN
+  ADDON
+  DEAL
+  NOTIFICATION
+  BLOG
+  SUPPORT
+  AUTH
+  USER_ACTIVITY
+}
+
+model AuditLog {
+  id              String        @id @default(auto()) @map("_id") @db.ObjectId
+  action          String // e.g. "USER_APPROVED", "PLAN_CREATED"
+  category        AuditCategory
+  performedById   String        @db.ObjectId
+  performedByName String
+  performedByRole String // "SUPER_ADMIN", "MANAGER", "USER", etc.
+  targetId        String?
+  targetType      String? // "User", "Plan", "Blog", etc.
+  description     String
+  metadata        Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([performedById])
+  @@index([category])
+  @@index([createdAt])
+  @@index([targetId])
+}
+
+enum PlanName {
+  QUARTERLY
+  ANNUAL
+}
+
+enum Country {
+  INDIA
+  INTERNATIONAL
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PostType {
+  PROVIDER
+  SEEKER
+}
+
+enum PostCategory {
+  BENCH
+  URGENT
+}
+
+enum PaymentType {
+  SUBSCRIPTION
+  POST
+  BOOST
+  REFRESH
+}
+
+enum PaymentCurrency {
+  INR
+  USD
+}
+
+model Transaction {
+  id          String          @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String          @db.ObjectId
+  type        PaymentType
+  amount      Float
+  currency    PaymentCurrency
+  status      String // SUCCESS, FAILED, PENDING
+  referenceId String? // Razorpay ID
+  postId      String?         @db.ObjectId // Optional, for post-related payments
+  createdAt   DateTime        @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
